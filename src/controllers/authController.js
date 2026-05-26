@@ -11,13 +11,13 @@ exports.login = async (req, res) => {
       return res.status(401).json({ message: "Email atau Password salah" });
     }
 
-    // PERBAIKAN: Gunakan fallback key jika process.env.JWT_SECRET kosong
+    // Gunakan fallback key jika process.env.JWT_SECRET kosong
     const secretKey = process.env.JWT_SECRET || 'super_secret_key_2026';
 
     const token = jwt.sign({ id: user._id }, secretKey, { expiresIn: '1d' });
     const refreshToken = jwt.sign({ id: user._id }, secretKey, { expiresIn: '7d' });
 
-    // persist refresh token for this user
+    // simpan refresh token untuk user ini
     user.refreshToken = refreshToken;
     await user.save();
 
@@ -29,18 +29,30 @@ exports.login = async (req, res) => {
 
 exports.register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ message: 'Nama, email, dan password diperlukan' });
+    // PERBAIKAN: Mengambil data nama baik dari properti 'name' ataupun 'fullName' yang dikirim frontend
+    const name = req.body.name || req.body.fullName;
+    const { email, password } = req.body;
 
+    // Validasi kelengkapan data input
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: 'Nama, email, dan password diperlukan' });
+    }
+
+    // Cek apakah email sudah terdaftar sebelumnya
     const existing = await User.findOne({ email });
-    if (existing) return res.status(409).json({ message: 'Email sudah terdaftar' });
+    if (existing) {
+      return res.status(409).json({ message: 'Email sudah terdaftar' });
+    }
 
+    // Enkripsi password menggunakan bcrypt
     const salt = await bcrypt.genSalt(10);
     const hashed = await bcrypt.hash(password, salt);
 
+    // Membuat instance user baru dan menyimpannya ke database MongoDB
     const user = new User({ name, email, password: hashed });
     await user.save();
 
+    // Pembuatan JWT Token setelah sukses mendaftar
     const secretKey = process.env.JWT_SECRET || 'super_secret_key_2026';
     const token = jwt.sign({ id: user._id }, secretKey, { expiresIn: '1d' });
     const refreshToken = jwt.sign({ id: user._id }, secretKey, { expiresIn: '7d' });
