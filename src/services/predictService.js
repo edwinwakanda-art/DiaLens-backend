@@ -20,6 +20,10 @@ function getCache(key) {
   return entry.value;
 }
 
+/**
+ * Heuristic Fallback Predictor
+ * Diperbaiki agar output strukturnya seragam dengan respons dari AI utama
+ */
 function fallbackPredict(payload) {
   // Lightweight heuristic fallback: combine age, bmi, and bloodSugar
   const age = Number(payload.Age || payload.age || payload.biometrics?.age || 0);
@@ -45,15 +49,28 @@ function fallbackPredict(payload) {
   }
 
   score = Math.max(0, Math.min(100, score));
+  
+  // Menentukan level risiko berdasarkan aturan score internal (High, Medium, Low)
+  const riskLevel = score >= 70 ? 'High' : score >= 40 ? 'Medium' : 'Low';
+
+  // Membuat template rekomendasi bawaan yang menggunakan format text bold (**) dan line-break (\n)
+  let recommendationsText = '';
+  if (riskLevel === 'High') {
+    recommendationsText = `*Interpretasi hasil* \nHasil analisis cepat mendeteksi indikasi tingkat risiko **High**. Berdasarkan kombinasi usia dan parameter fisik, diperlukan perhatian khusus. \n\n*3 langkah konkret untuk minggu ini* \n1. **Batasi Karbohidrat** – Kurangi porsi nasi putih dan singkirkan makanan/minuman manis olahan. \n2. **Kardio Terukur** – Lakukan jalan cepat atau olahraga ringan selama 30 menit setiap hari. \n3. **Konsultasi Formal** – Segera jadwalkan pemeriksaan laboratorium HbA1c ke fasilitas kesehatan terdekat.`;
+  } else if (riskLevel === 'Medium') {
+    recommendationsText = `*Interpretasi hasil* \nHasil analisis cepat berada pada level **Medium**. Anda disarankan untuk mulai mengontrol gaya hidup secara lebih disiplin. \n\n*3 langkah konkret untuk minggu ini* \n1. **Kurangi Camilan Malam** – Batasi konsumsi makanan berat atau camilan tinggi gula menjelang waktu tidur. \n2. **Kelola Waktu Istirahat** – Pastikan tidur malam berkualitas selama 7-8 jam untuk stabilitas metabolisme. \n3. **Tingkatkan Serat** – Perbanyak porsi sayur berdaun hijau di setiap menu makanan utama Anda.`;
+  } else {
+    recommendationsText = `*Interpretasi hasil* \nHasil analisis cepat menunjukkan tingkat risiko **Low**. Kondisi metabolisme tubuh Anda relatif stabil. \n\n*3 langkah konkret untuk minggu ini* \n1. **Pertahankan Hidrasi** – Minum air putih minimal 2 hingga 2,5 Liter secara konsisten setiap hari. \n2. **Aktivitas Fisik Rutin** – Upayakan berjalan kaki 30 menit setelah makan siang atau makan malam. \n3. **Skrining Berkala** – Lakukan pengecekan kesehatan mandiri secara berkala di DiaLens untuk memantau tren tubuh.`;
+  }
 
   return {
     probability: score / 100,
-    risk_level: score >= 70 ? 'High' : score >= 40 ? 'Medium' : 'Low',
+    risk_level: riskLevel,
     prediction: score >= 50 ? 1 : 0,
     threshold_used: 0.45,
     top_risk_factors: factors,
     explanation_method: 'heuristic_fallback',
-    ai_recommendation: 'Gunakan hasil ini sebagai indikasi cepat; lakukan pemeriksaan lengkap jika risiko tinggi.'
+    ai_recommendation: recommendationsText
   };
 }
 
@@ -104,7 +121,7 @@ function postJson(url, payload, opts = {}) {
 }
 
 exports.getAiPrediction = async (payload) => {
-  const envUrl = process.env.AI_PREDICT_URL || 'https://ai-api-dialens-production.up.railway.app';
+  const envUrl = process.env.AI_PREDICT_URL || 'https://ai-api-dialens-production.up.railway.app/';
   const path = process.env.AI_PREDICT_SCALAR === 'true' ? '/scalar' : '/predict';
   const aiUrl = envUrl.includes('/predict') || envUrl.includes('/scalar')
     ? envUrl
