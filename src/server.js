@@ -7,22 +7,33 @@ const healthRoutes = require('./routes/healthRoutes');
 
 const app = express();
 
-// 1. MIDDLEWARE WAJIB UNTUK VERCEL (Mengizinkan parsing JSON & CORS penuh)
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+// ==========================================
+// 1. MIDDLEWARE CORS & PARSING (YANG SUDAH DIPERBAIKI)
+// ==========================================
+
+// Gunakan konfigurasi CORS default (mengizinkan semua origin '*')
+app.use(cors());
+
+// WAJIB: Intersep request OPTIONS (Preflight) secara global sebelum masuk ke router
+app.options('*', cors());
+
+// Parsing JSON dan URL Encoded data
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+
+// ==========================================
 // 2. KONEKSI DATABASE
+// ==========================================
 const databaseUrl = process.env.MONGO_URI;
 mongoose.connect(databaseUrl || 'mongodb://127.0.0.1:27017/healthrisk-backend')
   .then(() => console.log('✅ MongoDB Connected Successfully'))
   .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
+
+// ==========================================
 // 3. ROUTING API
+// ==========================================
 app.use('/api/health', healthRoutes);
 
 // Rute tes status utama
