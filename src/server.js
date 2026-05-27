@@ -8,17 +8,11 @@ const healthRoutes = require('./routes/healthRoutes');
 const app = express();
 
 // ==========================================
-// 1. MIDDLEWARE CORS & PARSING (PERBAIKAN)
+// 1. MIDDLEWARE CORS & PARSING
 // ==========================================
-
-// app.use(cors()) secara otomatis mengizinkan semua origin (*) 
-// dan menangani preflight request (OPTIONS) secara global dengan aman tanpa memicu crash.
 app.use(cors());
-
-// Parsing JSON dan URL Encoded data
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
 
 // ==========================================
 // 2. KONEKSI DATABASE
@@ -28,7 +22,6 @@ mongoose.connect(databaseUrl || 'mongodb://127.0.0.1:27017/healthrisk-backend')
   .then(() => console.log('✅ MongoDB Connected Successfully'))
   .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
-
 // ==========================================
 // 3. ROUTING API
 // ==========================================
@@ -36,16 +29,16 @@ app.use('/api/health', healthRoutes);
 
 // Rute tes status utama
 app.get('/', (req, res) => {
-  res.send('🚀 DiaLens Backend Serverless is Running Smoothly from src folder!');
+  res.send('🚀 DiaLens Backend Server is Running Smoothly on Railway!');
 });
 
-// Jalankan port jika di komputer lokal (development)
-if (process.env.NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-  });
-}
+// ==========================================
+// 4. MENYALAKAN PORT SERVER (PERBAIKAN UTAMA)
+// ==========================================
+// Kunci utama agar Railway tidak melakukan "Stopping Container":
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server berjalan permanen dan mendengarkan port ${PORT}`);
+});
 
-// EKSPOR UTAMA UNTUK FUNCTION VERCEL
 module.exports = app;
