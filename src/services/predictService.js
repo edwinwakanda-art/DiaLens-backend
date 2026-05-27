@@ -75,7 +75,8 @@ function fallbackPredict(payload) {
 }
 
 function postJson(url, payload, opts = {}) {
-  const timeoutMs = opts.timeoutMs || Number(process.env.AI_REQUEST_TIMEOUT_MS) || 3000;
+  // Ditambahkan default fallback ke 60000 jika process.env tidak terbaca
+  const timeoutMs = opts.timeoutMs || Number(process.env.AI_REQUEST_TIMEOUT_MS) || 60000;
 
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
@@ -134,7 +135,8 @@ exports.getAiPrediction = async (payload) => {
   if (cached) return cached;
 
   try {
-    const resp = await postJson(aiUrl, payload, { timeoutMs: Number(process.env.AI_REQUEST_TIMEOUT_MS) || 3000 });
+    // Ditambahkan default fallback ke 60000 jika process.env tidak terbaca
+    const resp = await postJson(aiUrl, payload, { timeoutMs: Number(process.env.AI_REQUEST_TIMEOUT_MS) || 60000 });
     setCache(cacheKey, resp);
     return resp;
   } catch (err) {

@@ -14,15 +14,23 @@ router.post('/predict', authMiddleware, healthController.predict);
 // Endpoint: GET /api/health/records
 router.get('/records', authMiddleware, healthController.getRecords);
 
-// Debug: GET /api/health/me -> returns decoded token payload
-router.get('/me', authMiddleware, (req, res) => {
-  res.json({ user: req.user });
+// 🎯 TAMBAHKAN ENDPOINT HAPUS BARU INI
+router.delete('/records/:id', authMiddleware, async (req, res) => {
+  try {
+    const recordId = req.params.id;
+    const userId = req.user.id;
+
+    // Pastikan rekam medis yang dihapus benar-benar milik user yang sedang terautentikasi
+    const record = await require('../models/HealthRecord').findOneAndDelete({ _id: recordId, userId });
+
+    if (!record) {
+      return res.status(404).json({ message: 'Catatan medis tidak ditemukan atau Anda tidak memiliki akses.' });
+    }
+
+    res.status(200).json({ message: 'Catatan riwayat medis berhasil dihapus permanen.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Gagal memproses penghapusan data', detail: err.message });
+  }
 });
-
-// Endpoint: POST /api/health/refresh
-router.post('/refresh', authController.refresh);
-
-// Endpoint: POST /api/health/logout
-router.post('/logout', authMiddleware, authController.logout);
 
 module.exports = router;
