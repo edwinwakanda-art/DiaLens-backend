@@ -3,6 +3,7 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const healthController = require('../controllers/healthController');
 const authMiddleware = require('../middleware/authMiddleware');
+const HealthRecord = require('../models/HealthRecord'); // Di-import di atas agar clean
 
 // Endpoint: POST /api/health/login
 router.post('/login', authController.login);
@@ -14,14 +15,14 @@ router.post('/predict', authMiddleware, healthController.predict);
 // Endpoint: GET /api/health/records
 router.get('/records', authMiddleware, healthController.getRecords);
 
-// 🎯 TAMBAHKAN ENDPOINT HAPUS BARU INI
+// Endpoint: DELETE /api/health/records/:id
 router.delete('/records/:id', authMiddleware, async (req, res) => {
   try {
     const recordId = req.params.id;
     const userId = req.user.id;
 
-    // Pastikan rekam medis yang dihapus benar-benar milik user yang sedang terautentikasi
-    const record = await require('../models/HealthRecord').findOneAndDelete({ _id: recordId, userId });
+    // Menghapus menggunakan model yang sudah di-import di atas
+    const record = await HealthRecord.findOneAndDelete({ _id: recordId, userId });
 
     if (!record) {
       return res.status(404).json({ message: 'Catatan medis tidak ditemukan atau Anda tidak memiliki akses.' });
