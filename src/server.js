@@ -8,14 +8,12 @@ const healthRoutes = require('./routes/healthRoutes');
 const app = express();
 
 // ==========================================
-// 1. MIDDLEWARE CORS & PARSING (YANG SUDAH DIPERBAIKI)
+// 1. MIDDLEWARE CORS & PARSING (PERBAIKAN)
 // ==========================================
 
-// Gunakan konfigurasi CORS default (mengizinkan semua origin '*')
+// app.use(cors()) secara otomatis mengizinkan semua origin (*) 
+// dan menangani preflight request (OPTIONS) secara global dengan aman tanpa memicu crash.
 app.use(cors());
-
-// WAJIB: Intersep request OPTIONS (Preflight) secara global sebelum masuk ke router
-app.options('*', cors());
 
 // Parsing JSON dan URL Encoded data
 app.use(express.json());
