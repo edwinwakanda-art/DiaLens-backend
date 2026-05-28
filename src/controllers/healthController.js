@@ -15,7 +15,8 @@ function pickValue(payload, upperKey, lowerKey, groupKey) {
   return (
     payload[upperKey] ??
     payload[lowerKey] ??
-    payload[groupKey]?.[lowerKey]
+    payload[groupKey]?.[lowerKey] ??
+    payload[groupKey]?.[upperKey]
   );
 }
 
@@ -68,7 +69,7 @@ function normalizeTopRiskFactors(factors) {
 }
 
 // ==========================================================
-// 🚀 ENDPOINT: AMBIL RIWAYAT MEDIS
+// 🚀 ENDPOINT: AMBIL RIWAYAT MEDIS (GET)
 // ==========================================================
 exports.getRecords = async (req, res) => {
   try {
@@ -88,7 +89,6 @@ exports.getRecords = async (req, res) => {
     const formattedRecords = records.map(record => {
       const biometrics = record.biometrics || {};
       const results = record.results || {};
-
       const statusText = results.prediction === 1 ? 'Diabetes Terdeteksi' : 'Aman / Normal';
 
       return {
@@ -100,8 +100,8 @@ exports.getRecords = async (req, res) => {
         height: String(biometrics.height ?? '-'),
         bmi: String(biometrics.bmi ?? '-'),
         
-        highBP: String(record.clinical?.highBP ?? 'No'),
-        highChol: String(record.clinical?.highChol ?? 'No'),
+        highBP: String(record.clinical?.highBP === 1 || record.clinical?.highBP === '1' ? 'Ya' : 'Tidak'),
+        highChol: String(record.clinical?.highChol === 1 || record.clinical?.highChol === '1' ? 'Ya' : 'Tidak'),
         
         prediction: String(results.prediction ?? 0),
         status: statusText,
@@ -124,7 +124,7 @@ exports.getRecords = async (req, res) => {
 };
 
 // ==========================================================
-// 🚀 ENDPOINT: PROSES PREDIKSI & SIMPAN KE DATABASE
+// 🚀 ENDPOINT: PROSES PREDIKSI & SIMPAN KE DATABASE (POST)
 // ==========================================================
 exports.predict = async (req, res) => {
   try {
@@ -179,23 +179,21 @@ exports.predict = async (req, res) => {
     };
 
     // =========================================================================
-    // ✨ MULTI-KEY MAPPING: MENANGKAP VARIABEL APAPUN YANG DIKIRIM FRONTEND FORM
+    // ✨ FIX AKURASI: MENANGKAP VARIABEL ROOT MAUPUN DI DALAM OBJEK BIOMETRICS
     // =========================================================================
-    const weightRaw = payload.weight ?? 
-                      payload.Weight ?? 
+    const weightRaw = payload.biometrics?.weight ?? 
+                      payload.biometrics?.weightKg ?? 
+                      payload.weight ?? 
                       payload.weightKg ?? 
-                      payload.bb ?? 
-                      payload.biometrics?.weight ?? 
-                      payload.biometrics?.weightKg;
+                      payload.bb;
 
-    const heightRaw = payload.height ?? 
-                      payload.Height ?? 
+    const heightRaw = payload.biometrics?.height ?? 
+                      payload.biometrics?.heightCm ?? 
+                      payload.height ?? 
                       payload.heightCm ?? 
-                      payload.tb ?? 
-                      payload.biometrics?.height ?? 
-                      payload.biometrics?.heightCm;
+                      payload.tb;
 
-    // Simpan nilai asli berupa string, jika kosong berikan penanda string '-' murni
+    // Bersihkan nilai menjadi string murni tanpa ada backup angka hardcode rahasia
     const cleanWeight = (weightRaw !== null && weightRaw !== undefined) ? String(weightRaw).trim() : "-";
     const cleanHeight = (heightRaw !== null && heightRaw !== undefined) ? String(heightRaw).trim() : "-";
 
