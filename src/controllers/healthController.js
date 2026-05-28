@@ -87,7 +87,6 @@ exports.getRecords = async (req, res) => {
 
     const formattedRecords = records.map(record => {
       const biometrics = record.biometrics || {};
-      const clinical = record.clinical || {};
       const results = record.results || {};
 
       const statusText = results.prediction === 1 ? 'Diabetes Terdeteksi' : 'Aman / Normal';
@@ -101,8 +100,8 @@ exports.getRecords = async (req, res) => {
         height: String(biometrics.height ?? '-'),
         bmi: String(biometrics.bmi ?? '-'),
         
-        highBP: String(clinical.highBP ?? 'No'),
-        highChol: String(clinical.highChol ?? 'No'),
+        highBP: String(record.clinical?.highBP ?? 'No'),
+        highChol: String(record.clinical?.highChol ?? 'No'),
         
         prediction: String(results.prediction ?? 0),
         status: statusText,
@@ -139,7 +138,6 @@ exports.predict = async (req, res) => {
     }
 
     const payload = req.body;
-    
     const aiPayload = buildAiPayload(payload);
 
     const missingOrInvalidFields = validateAiPayload(aiPayload);
@@ -180,19 +178,24 @@ exports.predict = async (req, res) => {
       top_risk_factors: normalizeTopRiskFactors(aiResponse.top_risk_factors || aiResponse.topRiskFactors)
     };
 
+    // =========================================================================
+    // ✨ MULTI-KEY MAPPING: MENANGKAP VARIABEL APAPUN YANG DIKIRIM FRONTEND FORM
+    // =========================================================================
     const weightRaw = payload.weight ?? 
                       payload.Weight ?? 
                       payload.weightKg ?? 
+                      payload.bb ?? 
                       payload.biometrics?.weight ?? 
-                      payload.biometrics?.Weight;
+                      payload.biometrics?.weightKg;
 
     const heightRaw = payload.height ?? 
                       payload.Height ?? 
                       payload.heightCm ?? 
+                      payload.tb ?? 
                       payload.biometrics?.height ?? 
-                      payload.biometrics?.Height;
+                      payload.biometrics?.heightCm;
 
-    // Bersihkan nilai menjadi string murni tanpa ada angka default hardcode rahasia
+    // Simpan nilai asli berupa string, jika kosong berikan penanda string '-' murni
     const cleanWeight = (weightRaw !== null && weightRaw !== undefined) ? String(weightRaw).trim() : "-";
     const cleanHeight = (heightRaw !== null && heightRaw !== undefined) ? String(heightRaw).trim() : "-";
 
