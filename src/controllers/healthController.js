@@ -23,140 +23,129 @@ function normalizeTopRiskFactors(factors) {
   });
 }
 
+// Helper untuk prediksi cadangan (Heuristic Fallback) jika AI utama offline
+function fallbackPredict(payload) {
+  const age = Number(payload.Age || payload.age || 0);
+  const bmi = Number(payload.BMI || payload.bmi || 0);
+  
+  let score = 0;
+  if (age >= 45) score += 0.2;
+  if (bmi >= 25) score += 0.25;
+
+  const riskLevel = score > 0.4 ? 'High' : score > 0.15 ? 'Medium' : 'Low';
+  return {
+    probability: score,
+    risk_level: riskLevel,
+    prediction: score > 0.4 ? 1 : 0,
+    threshold_used: 0.4,
+    explanation_method: 'Heuristic Fallback',
+    ai_recommendation: 'Silakan lakukan konsultasi medis resmi untuk hasil akurat.',
+    top_risk_factors: [
+      { feature: 'Age', shap_value: age, direction: 'positive' },
+      { feature: 'BMI', shap_value: bmi, direction: 'positive' }
+    ]
+  };
+}
+
 // ==========================================================
-// 🚀 ENDPOINT: AMBIL RIWAYAT MEDIS (ANTI-500 CRASH GUARANTEE)
+// 🚀 ENDPOINT: AMBIL RIWAYAT MEDIS (FLATTENED PAYLOAD FOR FRONTEND)
 // ==========================================================
 exports.getRecords = async (req, res) => {
   try {
-    // 1. Ekstraksi ID Pengguna secara berlapis dari token JWT (Mencegah Undefined)
+    // 1. Ekstraksi ID Pengguna secara berlapis dari token JWT
     let rawUserId = null;
     if (req.user) {
-      rawUserId = req.user.id || req.user._id || (req.user.user && (req.user.user.id || req.user.user._id));
+      rawUserId = req.user.id || req.user._id || req.user.userId;
     }
 
-    // Jika ID benar-back-empty, kembalikan JSON status 401 bukan melempar crash server HTML
     if (!rawUserId) {
-      console.warn('⚠️ Request /records ditolak: ID Pengguna tidak ditemukan di token req.user');
-      return res.status(401).json({ 
-        message: 'Akses ditolak. Sesi autentikasi Anda tidak membawa ID Pengguna yang valid.' 
-      });
+      return res.status(401).json({ message: 'Akses ditolak. Token tidak mengenali ID Pengguna.' });
     }
 
-    const userIdStr = String(rawUserId).trim();
+    // 2. Ambil data dari database berdasarkan userId, urutkan dari yang terbaru
+    const records = await HealthRecord.find({ 
+      userId: new mongoose.Types.ObjectId(String(rawUserId).trim()) 
+    }).sort({ date: -1 });
 
-    // 2. Validasi format string: Apakah memenuhi standar BSON ObjectId MongoDB?
-    if (!mongoose.Types.ObjectId.isValid(userIdStr)) {
-      console.warn(`⚠️ Format ID Pengguna tidak standar MongoDB: "${userIdStr}"`);
-      return res.status(400).json({ 
-        message: 'Format User ID di dalam token tidak valid untuk pencarian database.' 
-      });
-    }
+    // 3. ✨ PERBAIKAN UTAMA: Transformasi data bersarang menjadi flat object sesuai interface Next.js
+    const formattedRecords = records.map(record => {
+      const biometrics = record.biometrics || {};
+      const clinical = record.clinical || {};
+      const results = record.results || {};
 
-    // 3. Konversi string ke ObjectId asli agar Mongoose tidak melempar CastError 500
-    const targetObjectId = new mongoose.Types.ObjectId(userIdStr);
-
-    // 4. Pastikan model database siap digunakan
-    if (!HealthRecord) {
-      return res.status(500).json({ 
-        error: 'Model database internal error', 
-        message: 'Skema model HealthRecord gagal dimuat di server backend.' 
-      });
-    }
-
-    // 5. Jalankan query pencarian ke database MongoDB Cluster
-    const records = await HealthRecord.find({ userId: targetObjectId }).sort({ date: -1 });
-
-    // JIKA data di database masih kosong, JANGAN di-crash-kan. Kembalikan array kosong [] secara sukses (200 OK)
-    if (!records || records.length === 0) {
-      return res.status(200).json([]);
-    }
-
-    // 6. Normalisasi data agar strukturnya aman dikonsumsi oleh chart Recharts Frontend
-    const flattenedRecords = records.map((rec) => {
-      const biometrics = rec.biometrics || {};
-      const results = rec.results || {};
-
-      let currentBmi = biometrics.bmi || '-';
-      if ((currentBmi === '-' || currentBmi === 0 || !currentBmi) && biometrics.weight && biometrics.height) {
-        const w = parseFloat(biometrics.weight);
-        const h = parseFloat(biometrics.height) / 100;
-        if (w > 0 && h > 0) {
-          currentBmi = (w / (h * h)).toFixed(1);
-        }
-      }
-
-      let rawRisk = undefined;
-      if (results.diabetesRisk !== undefined && results.diabetesRisk !== null) {
-        rawRisk = results.diabetesRisk;
-      } else if (results.diabetesrisk !== undefined && results.diabetesrisk !== null) {
-        rawRisk = results.diabetesrisk;
-      } else if (rec.diabetesRisk !== undefined) {
-        rawRisk = rec.diabetesRisk;
-      }
-
-      const finalDiabetesRisk = (rawRisk !== undefined && !isNaN(rawRisk)) ? Math.round(Number(rawRisk)) : null;
+      // Konversi nilai prediksi numerik ke status teks yang ramah dibaca frontend
+      const statusText = results.prediction === 1 ? 'Diabetes Terdeteksi' : 'Aman / Normal';
 
       return {
-        id: rec._id ? rec._id.toString() : 'DL-Log',
-        date: rec.date || rec.createdAt || new Date().toISOString(),
-        age: biometrics.Age || biometrics.age || '-',
-        weight: biometrics.weight || '-',
-        height: biometrics.height || '-',
-        bmi: String(currentBmi),
-        highBP: rec.clinical?.highBP || 'No',
-        highChol: rec.clinical?.highChol || 'No',
-        prediction: results.riskLevel || results.prediction || 'Low',
-        status: results.prediction === 1 || results.riskLevel === 'High' ? 'Warning' : 'Safe',
-        ai_recommendation: results.aiRecommendation || 'Tidak ada rekomendasi dari AI.',
-        risk_level: results.riskLevel || 'Low',
-        diabetesRisk: finalDiabetesRisk 
+        id: record._id.toString(),
+        date: record.date,
+        
+        // Meratakan (Flattening) properti biometrics
+        age: String(biometrics.age ?? '-'),
+        weight: String(biometrics.weight ?? '-'),
+        height: String(biometrics.height ?? '-'),
+        bmi: String(biometrics.bmi ?? '-'),
+        
+        // Meratakan properti clinical
+        highBP: String(clinical.highBP ?? 'No'),
+        highChol: String(clinical.highChol ?? 'No'),
+        
+        // Meratakan properti results
+        prediction: String(results.prediction ?? 0),
+        status: statusText,
+        risk_level: results.riskLevel || 'Unknown',
+        diabetesRisk: results.diabetesRisk ?? 0,
+        ai_recommendation: results.aiRecommendation || 'Tidak ada rekomendasi.',
+        topRiskFactors: results.topRiskFactors || []
       };
     });
 
-    // 7. Kirim respon sukses dalam format JSON murni
-    return res.status(200).json(flattenedRecords);
+    // 4. Kirim data yang sudah rapi ke frontend
+    return res.status(200).json(formattedRecords);
 
   } catch (err) {
-    console.error('❌ Error fatal di dalam fungsi getRecords:', err);
-    // Jika crash total terjadi, paksa kembalikan JSON terstruktur agar frontend tidak menangkap HTML
+    console.error("❌ Error di getRecords:", err);
     return res.status(500).json({ 
-      error: 'Terjadi kegagalan sistem internal database.', 
-      message: err.message 
+      message: 'Gagal mengambil riwayat medis dari server.', 
+      detail: err.message 
     });
   }
 };
 
 // ==========================================================
-// 🚀 ENDPOINT: PROSES PREDIKSI AI BARU
+// 🚀 ENDPOINT: PROSES PREDIKSI & SIMPAN KE DATABASE
 // ==========================================================
 exports.predict = async (req, res) => {
   try {
-    const payload = req.body;
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      return res.status(400).json({ message: 'Payload JSON diperlukan untuk melakukan prediksi.' });
+    let rawUserId = null;
+    if (req.user) {
+      rawUserId = req.user.id || req.user._id || req.user.userId;
     }
 
-    let rawUserId = req.user ? (req.user.id || req.user._id || (req.user.user && (req.user.user.id || req.user.user._id))) : null;
     if (!rawUserId) {
-      return res.status(401).json({ message: 'Akses ditolak. Sesi login Anda tidak valid.' });
+      return res.status(401).json({ message: 'Akses ditolak. Pengguna tidak terautentikasi.' });
     }
 
-    const { getAiPrediction } = require('../services/predictService');
-    const aiResponse = await getAiPrediction(payload);
+    const payload = req.body;
+    const predictService = require('../services/predictService');
+    
+    let aiResponse;
+    try {
+      aiResponse = await predictService.getAiPrediction(payload);
+    } catch (aiErr) {
+      console.warn("⚠️ AI Service gagal, beralih ke Fallback Predictor:", aiErr.message);
+      aiResponse = fallbackPredict(payload);
+    }
 
     const normalizedResponse = {
-      probability: typeof aiResponse.probability === 'number' ? aiResponse.probability : Number(aiResponse.probability || 0),
-      risk_level: aiResponse.risk_level || aiResponse.riskLevel || null,
-      prediction: typeof aiResponse.prediction === 'number' ? aiResponse.prediction : (aiResponse.prediction === true ? 1 : aiResponse.prediction === false ? 0 : null),
-      threshold_used: typeof aiResponse.threshold_used === 'number' ? aiResponse.threshold_used : typeof aiResponse.thresholdUsed === 'number' ? aiResponse.thresholdUsed : null,
-      explanation_method: aiResponse.explanation_method || aiResponse.explanationMethod || null,
-      ai_recommendation: aiResponse.ai_recommendation || aiResponse.aiRecommendation || 'Tidak ada rekomendasi dari AI.',
+      probability: typeof aiResponse.probability === 'number' ? aiResponse.probability : 0,
+      risk_level: aiResponse.risk_level || 'Unknown',
+      prediction: typeof aiResponse.prediction === 'number' ? aiResponse.prediction : 0,
+      threshold_used: aiResponse.threshold_used || 0.5,
+      explanation_method: aiResponse.explanation_method || 'N/A',
+      ai_recommendation: aiResponse.ai_recommendation || '',
       top_risk_factors: normalizeTopRiskFactors(aiResponse.top_risk_factors || aiResponse.topRiskFactors)
     };
-
-    if (!HealthRecord) {
-      return res.status(500).json({ error: 'Model database belum siap.' });
-    }
 
     const newRecord = new HealthRecord({
       userId: new mongoose.Types.ObjectId(String(rawUserId).trim()),
@@ -191,7 +180,7 @@ exports.predict = async (req, res) => {
     });
 
   } catch (err) {
-    console.error('❌ Error di endpoint predict:', err);
-    return res.status(500).json({ error: 'Gagal memproses prediksi AI', message: err.message });
+    console.error("❌ Error di predict:", err);
+    return res.status(500).json({ message: 'Gagal memproses AI Skrining.', error: err.message });
   }
 };
