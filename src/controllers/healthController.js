@@ -180,35 +180,29 @@ exports.predict = async (req, res) => {
       top_risk_factors: normalizeTopRiskFactors(aiResponse.top_risk_factors || aiResponse.topRiskFactors)
     };
 
-    // =========================================================================
-    // ✨ DETEKSI CERDAS KEY VARIABEL DARI FRONTEND (MENCEGAH ERROR SINKRONISASI)
-    // =========================================================================
     const weightRaw = payload.weight ?? 
                       payload.Weight ?? 
                       payload.weightKg ?? 
                       payload.biometrics?.weight ?? 
-                      payload.biometrics?.Weight ?? "-";
+                      payload.biometrics?.Weight;
 
     const heightRaw = payload.height ?? 
                       payload.Height ?? 
                       payload.heightCm ?? 
                       payload.biometrics?.height ?? 
-                      payload.biometrics?.Height ?? "-";
+                      payload.biometrics?.Height;
 
-    let cleanWeight = weightRaw !== null && weightRaw !== undefined ? String(weightRaw).trim() : "-";
-    let cleanHeight = heightRaw !== null && heightRaw !== undefined ? String(heightRaw).trim() : "-";
-
-    // Jika data benar-benar kosong/corrupt barulah berikan default nilai standar
-    if (cleanWeight === "-" || cleanWeight === "0") cleanWeight = "70";
-    if (cleanHeight === "-" || cleanHeight === "0") cleanHeight = "165";
+    // Bersihkan nilai menjadi string murni tanpa ada angka default hardcode rahasia
+    const cleanWeight = (weightRaw !== null && weightRaw !== undefined) ? String(weightRaw).trim() : "-";
+    const cleanHeight = (heightRaw !== null && heightRaw !== undefined) ? String(heightRaw).trim() : "-";
 
     const newRecord = new HealthRecord({
       userId: new mongoose.Types.ObjectId(String(rawUserId).trim()),
       biometrics: {
         age: aiPayload.Age,
         bmi: aiPayload.BMI,
-        weight: cleanWeight, // Menyimpan nilai asli kiriman form secara dinamis
-        height: cleanHeight  // Menyimpan nilai asli kiriman form secara dinamis
+        weight: cleanWeight, 
+        height: cleanHeight  
       },
       clinical: {
         highBP: aiPayload.HighBP,
