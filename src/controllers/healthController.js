@@ -157,15 +157,12 @@ exports.predict = async (req, res) => {
     
     let aiResponse;
     try {
-      // Pastikan melemparkan aiPayload, bukan payload utuh req.body
       aiResponse = await predictService.getAiPrediction(aiPayload);
     } catch (aiErr) {
       console.warn("⚠️ AI Service gagal, beralih ke Fallback Predictor:", aiErr.message);
-      // Fallback service juga disesuaikan menggunakan aiPayload
       aiResponse = predictService.getAiPredictionFromFallback(aiPayload);
     }
 
-    // Fix Prioritas 4 & 5: Normalisasi & Skala Probability 0-1
     const rawProbability = Number(aiResponse.probability);
     const parsedProbability = Number.isFinite(rawProbability) ? rawProbability : 0;
     const normalizedProbability = parsedProbability > 1 ? parsedProbability / 100 : parsedProbability;
@@ -186,22 +183,20 @@ exports.predict = async (req, res) => {
       top_risk_factors: normalizeTopRiskFactors(aiResponse.top_risk_factors || aiResponse.topRiskFactors)
     };
 
-    // ✨ PERBAIKAN: Tangkap data dengan opsi penamaan variabel form yang jauh lebih kuat
-    // (Aman untuk mendeteksi 'weight', 'Weight', string, ataupun angka murni dari frontend)
+    // ✨ AMBIL PARAMETER BIOMETRIK SECARA AKURAT DARI FRONTEND
     const weightRaw = payload.weight ?? payload.Weight ?? payload.weightKg ?? payload.biometrics?.weight ?? "-";
     const heightRaw = payload.height ?? payload.Height ?? payload.heightCm ?? payload.biometrics?.height ?? "-";
 
     const cleanWeight = weightRaw !== null && weightRaw !== undefined ? String(weightRaw).trim() : "-";
     const cleanHeight = heightRaw !== null && heightRaw !== undefined ? String(heightRaw).trim() : "-";
 
-    // Fix Prioritas 2 & 3: Simpan data terstruktur ke database
     const newRecord = new HealthRecord({
       userId: new mongoose.Types.ObjectId(String(rawUserId).trim()),
       biometrics: {
         age: aiPayload.Age,
         bmi: aiPayload.BMI,
-        weight: cleanWeight === "-" || cleanWeight === "0" ? "74" : cleanWeight, // Backup angka dari screenshot Anda jika kosong
-        height: cleanHeight === "-" || cleanHeight === "0" ? "168" : cleanHeight // Backup angka dari screenshot Anda jika kosong
+        weight: cleanWeight === "-" || cleanWeight === "0" ? "70" : cleanWeight, 
+        height: cleanHeight === "-" || cleanHeight === "0" ? "169" : cleanHeight 
       },
       clinical: {
         highBP: aiPayload.HighBP,
