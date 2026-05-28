@@ -9,7 +9,7 @@ try {
 }
 
 // ==========================================================
-// 🛠️ HELPER FUNCTIONS (FIX PRIORITAS 1 & 7)
+// 🛠️ HELPER FUNCTIONS
 // ==========================================================
 function pickValue(payload, upperKey, lowerKey, groupKey) {
   return (
@@ -53,7 +53,6 @@ function validateAiPayload(aiPayload) {
   return requiredFields.filter((field) => !Number.isFinite(aiPayload[field]));
 }
 
-// Helper untuk normalisasi top risk factors
 function normalizeTopRiskFactors(factors) {
   if (!Array.isArray(factors)) return [];
   return factors.map((factor) => {
@@ -69,7 +68,7 @@ function normalizeTopRiskFactors(factors) {
 }
 
 // ==========================================================
-// 🚀 ENDPOINT: AMBIL RIWAYAT MEDIS (FLATTENED PAYLOAD FOR FRONTEND)
+// 🚀 ENDPOINT: AMBIL RIWAYAT MEDIS
 // ==========================================================
 exports.getRecords = async (req, res) => {
   try {
@@ -141,10 +140,8 @@ exports.predict = async (req, res) => {
 
     const payload = req.body;
     
-    // Fix Prioritas 1: Bangun payload khusus AI
     const aiPayload = buildAiPayload(payload);
 
-    // Fix Prioritas 7: Validasi payload AI sebelum menembak service
     const missingOrInvalidFields = validateAiPayload(aiPayload);
     if (missingOrInvalidFields.length > 0) {
       return res.status(400).json({
@@ -183,20 +180,35 @@ exports.predict = async (req, res) => {
       top_risk_factors: normalizeTopRiskFactors(aiResponse.top_risk_factors || aiResponse.topRiskFactors)
     };
 
-    // ✨ AMBIL PARAMETER BIOMETRIK SECARA AKURAT DARI FRONTEND
-    const weightRaw = payload.weight ?? payload.Weight ?? payload.weightKg ?? payload.biometrics?.weight ?? "-";
-    const heightRaw = payload.height ?? payload.Height ?? payload.heightCm ?? payload.biometrics?.height ?? "-";
+    // =========================================================================
+    // ✨ DETEKSI CERDAS KEY VARIABEL DARI FRONTEND (MENCEGAH ERROR SINKRONISASI)
+    // =========================================================================
+    const weightRaw = payload.weight ?? 
+                      payload.Weight ?? 
+                      payload.weightKg ?? 
+                      payload.biometrics?.weight ?? 
+                      payload.biometrics?.Weight ?? "-";
 
-    const cleanWeight = weightRaw !== null && weightRaw !== undefined ? String(weightRaw).trim() : "-";
-    const cleanHeight = heightRaw !== null && heightRaw !== undefined ? String(heightRaw).trim() : "-";
+    const heightRaw = payload.height ?? 
+                      payload.Height ?? 
+                      payload.heightCm ?? 
+                      payload.biometrics?.height ?? 
+                      payload.biometrics?.Height ?? "-";
+
+    let cleanWeight = weightRaw !== null && weightRaw !== undefined ? String(weightRaw).trim() : "-";
+    let cleanHeight = heightRaw !== null && heightRaw !== undefined ? String(heightRaw).trim() : "-";
+
+    // Jika data benar-benar kosong/corrupt barulah berikan default nilai standar
+    if (cleanWeight === "-" || cleanWeight === "0") cleanWeight = "70";
+    if (cleanHeight === "-" || cleanHeight === "0") cleanHeight = "165";
 
     const newRecord = new HealthRecord({
       userId: new mongoose.Types.ObjectId(String(rawUserId).trim()),
       biometrics: {
         age: aiPayload.Age,
         bmi: aiPayload.BMI,
-        weight: cleanWeight === "-" || cleanWeight === "0" ? "70" : cleanWeight, 
-        height: cleanHeight === "-" || cleanHeight === "0" ? "169" : cleanHeight 
+        weight: cleanWeight, // Menyimpan nilai asli kiriman form secara dinamis
+        height: cleanHeight  // Menyimpan nilai asli kiriman form secara dinamis
       },
       clinical: {
         highBP: aiPayload.HighBP,
