@@ -1,6 +1,5 @@
 const mongoose = require('mongoose');
 
-// Pastikan pemanggilan Model HealthRecord aman dan tidak bernilai undefined
 let HealthRecord;
 try {
   HealthRecord = require('../models/HealthRecord');
@@ -8,15 +7,11 @@ try {
   console.error("❌ Gagal me-require model HealthRecord:", e);
 }
 
-// ==========================================================
-// 🛠️ HELPER FUNCTIONS
-// ==========================================================
 function pickValue(payload, upperKey, lowerKey, groupKey) {
   return (
     payload[upperKey] ??
     payload[lowerKey] ??
-    payload[groupKey]?.[lowerKey] ??
-    payload[groupKey]?.[upperKey]
+    payload[groupKey]?.[lowerKey]
   );
 }
 
@@ -33,54 +28,20 @@ function buildAiPayload(payload) {
     Age: toNumberOrDefault(pickValue(payload, 'Age', 'age', 'biometrics')),
     CholCheck: toNumberOrDefault(pickValue(payload, 'CholCheck', 'cholCheck', 'clinical')),
     HvyAlcoholConsump: toNumberOrDefault(pickValue(payload, 'HvyAlcoholConsump', 'hvyAlcoholConsump', 'lifestyle')),
-    BMI: toNumberOrDefault(pickValue(payload, 'BMI', 'bmi', 'biometrics')),
+    BMI: toNumberOrDefault(pickValue(payload, 'BMI', 'bmi', 'biometrics'), 22),
     PhysActivity: toNumberOrDefault(pickValue(payload, 'PhysActivity', 'physActivity', 'lifestyle')),
     Smoker: toNumberOrDefault(pickValue(payload, 'Smoker', 'smoker', 'lifestyle'))
   };
 }
 
-function validateAiPayload(aiPayload) {
-  const requiredFields = [
-    'HighBP',
-    'GenHlth',
-    'HighChol',
-    'Age',
-    'CholCheck',
-    'HvyAlcoholConsump',
-    'BMI',
-    'PhysActivity',
-    'Smoker'
-  ];
-  return requiredFields.filter((field) => !Number.isFinite(aiPayload[field]));
-}
-
-function normalizeTopRiskFactors(factors) {
-  if (!Array.isArray(factors)) return [];
-  return factors.map((factor) => {
-    if (typeof factor === 'string') {
-      return { feature: factor, shap_value: null, direction: 'unknown' };
-    }
-    return {
-      feature: factor.feature || factor.name || null,
-      shap_value: typeof factor.shap_value === 'number' ? factor.shap_value : typeof factor.value === 'number' ? factor.value : null,
-      direction: factor.direction || factor.effect || 'unknown'
-    };
-  });
-}
-
 // ==========================================================
-// 🚀 ENDPOINT: AMBIL RIWAYAT MEDIS (GET)
+// 🚀 ENDPOINT GET RECORDS
 // ==========================================================
 exports.getRecords = async (req, res) => {
   try {
     let rawUserId = null;
-    if (req.user) {
-      rawUserId = req.user.id || req.user._id || req.user.userId;
-    }
-
-    if (!rawUserId) {
-      return res.status(401).json({ message: 'Akses ditolak. Token tidak mengenali ID Pengguna.' });
-    }
+    if (req.user) rawUserId = req.user.id || req.user._id || req.user.userId;
+    if (!rawUserId) return res.status(401).json({ message: 'Akses ditolak.' });
 
     const records = await HealthRecord.find({ 
       userId: new mongoose.Types.ObjectId(String(rawUserId).trim()) 
@@ -94,15 +55,12 @@ exports.getRecords = async (req, res) => {
       return {
         id: record._id.toString(),
         date: record.date,
-        
         age: String(biometrics.age ?? '-'),
         weight: String(biometrics.weight ?? '-'),
         height: String(biometrics.height ?? '-'),
         bmi: String(biometrics.bmi ?? '-'),
-        
-        highBP: String(record.clinical?.highBP === 1 || record.clinical?.highBP === '1' ? 'Ya' : 'Tidak'),
-        highChol: String(record.clinical?.highChol === 1 || record.clinical?.highChol === '1' ? 'Ya' : 'Tidak'),
-        
+        highBP: String(record.clinical?.highBP === 1 ? 'Ya' : 'Tidak'),
+        highChol: String(record.clinical?.highChol === 1 ? 'Ya' : 'Tidak'),
         prediction: String(results.prediction ?? 0),
         status: statusText,
         risk_level: results.riskLevel || 'Unknown',
@@ -113,48 +71,28 @@ exports.getRecords = async (req, res) => {
     });
 
     return res.status(200).json(formattedRecords);
-
   } catch (err) {
-    console.error("❌ Error di getRecords:", err);
-    return res.status(500).json({ 
-      message: 'Gagal mengambil riwayat medis dari server.', 
-      detail: err.message 
-    });
+    return res.status(500).json({ message: 'Gagal mengambil data.', detail: err.message });
   }
 };
 
 // ==========================================================
-// 🚀 ENDPOINT: PROSES PREDIKSI & SIMPAN KE DATABASE (POST)
+// 🚀 ENDPOINT POST PREDICT
 // ==========================================================
 exports.predict = async (req, res) => {
   try {
     let rawUserId = null;
-    if (req.user) {
-      rawUserId = req.user.id || req.user._id || req.user.userId;
-    }
-
-    if (!rawUserId) {
-      return res.status(401).json({ message: 'Akses ditolak. Pengguna tidak terautentikasi.' });
-    }
+    if (req.user) rawUserId = req.user.id || req.user._id || req.user.userId;
+    if (!rawUserId) return res.status(401).json({ message: 'Akses ditolak.' });
 
     const payload = req.body;
     const aiPayload = buildAiPayload(payload);
 
-    const missingOrInvalidFields = validateAiPayload(aiPayload);
-    if (missingOrInvalidFields.length > 0) {
-      return res.status(400).json({
-        message: 'Payload prediksi tidak valid.',
-        fields: missingOrInvalidFields
-      });
-    }
-
     const predictService = require('../services/predictService');
-    
     let aiResponse;
     try {
       aiResponse = await predictService.getAiPrediction(aiPayload);
     } catch (aiErr) {
-      console.warn("⚠️ AI Service gagal, beralih ke Fallback Predictor:", aiErr.message);
       aiResponse = predictService.getAiPredictionFromFallback(aiPayload);
     }
 
@@ -162,38 +100,20 @@ exports.predict = async (req, res) => {
     const parsedProbability = Number.isFinite(rawProbability) ? rawProbability : 0;
     const normalizedProbability = parsedProbability > 1 ? parsedProbability / 100 : parsedProbability;
 
-    const rawPrediction = Number(aiResponse.prediction);
-    const normalizedPrediction = Number.isFinite(rawPrediction) ? rawPrediction : 0;
-
-    const rawThreshold = Number(aiResponse.threshold_used);
-    const normalizedThreshold = Number.isFinite(rawThreshold) ? rawThreshold : 0.5;
-
     const normalizedResponse = {
       probability: normalizedProbability,
       risk_level: aiResponse.risk_level || 'Unknown',
-      prediction: normalizedPrediction,
-      threshold_used: normalizedThreshold,
+      prediction: Number(aiResponse.prediction) || 0,
+      threshold_used: Number(aiResponse.threshold_used) || 0.5,
       explanation_method: aiResponse.explanation_method || 'N/A',
       ai_recommendation: aiResponse.ai_recommendation || '',
-      top_risk_factors: normalizeTopRiskFactors(aiResponse.top_risk_factors || aiResponse.topRiskFactors)
+      top_risk_factors: aiResponse.top_risk_factors || []
     };
 
-    // =========================================================================
-    // ✨ FIX AKURASI: MENANGKAP VARIABEL ROOT MAUPUN DI DALAM OBJEK BIOMETRICS
-    // =========================================================================
-    const weightRaw = payload.biometrics?.weight ?? 
-                      payload.biometrics?.weightKg ?? 
-                      payload.weight ?? 
-                      payload.weightKg ?? 
-                      payload.bb;
+    // ✨ AMBIL DATA BB & TB DARI HTTP HEADERS (PAYLOAD UTAMA TETAP 9 DATA AMAN)
+    const weightRaw = req.headers['x-user-weight'];
+    const heightRaw = req.headers['x-user-height'];
 
-    const heightRaw = payload.biometrics?.height ?? 
-                      payload.biometrics?.heightCm ?? 
-                      payload.height ?? 
-                      payload.heightCm ?? 
-                      payload.tb;
-
-    // Bersihkan nilai menjadi string murni tanpa ada backup angka hardcode rahasia
     const cleanWeight = (weightRaw !== null && weightRaw !== undefined) ? String(weightRaw).trim() : "-";
     const cleanHeight = (heightRaw !== null && heightRaw !== undefined) ? String(heightRaw).trim() : "-";
 
@@ -235,7 +155,7 @@ exports.predict = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("❌ Error di predict:", err);
-    return res.status(500).json({ message: 'Gagal memproses AI Skrining.', error: err.message });
+    console.error("❌ Error:", err);
+    return res.status(500).json({ message: 'Gagal memproses.', error: err.message });
   }
 };
