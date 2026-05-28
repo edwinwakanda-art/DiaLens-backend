@@ -8,6 +8,51 @@ try {
   console.error("❌ Gagal me-require model HealthRecord:", e);
 }
 
+// ==========================================================
+// 🛠️ HELPER FUNCTIONS (FIX PRIORITAS 1 & 7)
+// ==========================================================
+function pickValue(payload, upperKey, lowerKey, groupKey) {
+  return (
+    payload[upperKey] ??
+    payload[lowerKey] ??
+    payload[groupKey]?.[lowerKey]
+  );
+}
+
+function toNumberOrDefault(value, defaultValue = 0) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : defaultValue;
+}
+
+function buildAiPayload(payload) {
+  return {
+    HighBP: toNumberOrDefault(pickValue(payload, 'HighBP', 'highBP', 'clinical')),
+    GenHlth: toNumberOrDefault(pickValue(payload, 'GenHlth', 'genHlth', 'clinical'), 1),
+    HighChol: toNumberOrDefault(pickValue(payload, 'HighChol', 'highChol', 'clinical')),
+    Age: toNumberOrDefault(pickValue(payload, 'Age', 'age', 'biometrics')),
+    CholCheck: toNumberOrDefault(pickValue(payload, 'CholCheck', 'cholCheck', 'clinical')),
+    HvyAlcoholConsump: toNumberOrDefault(pickValue(payload, 'HvyAlcoholConsump', 'hvyAlcoholConsump', 'lifestyle')),
+    BMI: toNumberOrDefault(pickValue(payload, 'BMI', 'bmi', 'biometrics')),
+    PhysActivity: toNumberOrDefault(pickValue(payload, 'PhysActivity', 'physActivity', 'lifestyle')),
+    Smoker: toNumberOrDefault(pickValue(payload, 'Smoker', 'smoker', 'lifestyle'))
+  };
+}
+
+function validateAiPayload(aiPayload) {
+  const requiredFields = [
+    'HighBP',
+    'GenHlth',
+    'HighChol',
+    'Age',
+    'CholCheck',
+    'HvyAlcoholConsump',
+    'BMI',
+    'PhysActivity',
+    'Smoker'
+  ];
+  return requiredFields.filter((field) => !Number.isFinite(aiPayload[field]));
+}
+
 // Helper untuk normalisasi top risk factors
 function normalizeTopRiskFactors(factors) {
   if (!Array.isArray(factors)) return [];
@@ -23,36 +68,11 @@ function normalizeTopRiskFactors(factors) {
   });
 }
 
-// Helper untuk prediksi cadangan (Heuristic Fallback) jika AI utama offline
-function fallbackPredict(payload) {
-  const age = Number(payload.Age || payload.age || 0);
-  const bmi = Number(payload.BMI || payload.bmi || 0);
-  
-  let score = 0;
-  if (age >= 45) score += 0.2;
-  if (bmi >= 25) score += 0.25;
-
-  const riskLevel = score > 0.4 ? 'High' : score > 0.15 ? 'Medium' : 'Low';
-  return {
-    probability: score,
-    risk_level: riskLevel,
-    prediction: score > 0.4 ? 1 : 0,
-    threshold_used: 0.4,
-    explanation_method: 'Heuristic Fallback',
-    ai_recommendation: 'Silakan lakukan konsultasi medis resmi untuk hasil akurat.',
-    top_risk_factors: [
-      { feature: 'Age', shap_value: age, direction: 'positive' },
-      { feature: 'BMI', shap_value: bmi, direction: 'positive' }
-    ]
-  };
-}
-
 // ==========================================================
 // 🚀 ENDPOINT: AMBIL RIWAYAT MEDIS (FLATTENED PAYLOAD FOR FRONTEND)
 // ==========================================================
 exports.getRecords = async (req, res) => {
   try {
-    // 1. Ekstraksi ID Pengguna secara berlapis dari token JWT
     let rawUserId = null;
     if (req.user) {
       rawUserId = req.user.id || req.user._id || req.user.userId;
@@ -62,35 +82,29 @@ exports.getRecords = async (req, res) => {
       return res.status(401).json({ message: 'Akses ditolak. Token tidak mengenali ID Pengguna.' });
     }
 
-    // 2. Ambil data dari database berdasarkan userId, urutkan dari yang terbaru
     const records = await HealthRecord.find({ 
       userId: new mongoose.Types.ObjectId(String(rawUserId).trim()) 
     }).sort({ date: -1 });
 
-    // 3. ✨ PERBAIKAN UTAMA: Transformasi data bersarang menjadi flat object sesuai interface Next.js
     const formattedRecords = records.map(record => {
       const biometrics = record.biometrics || {};
       const clinical = record.clinical || {};
       const results = record.results || {};
 
-      // Konversi nilai prediksi numerik ke status teks yang ramah dibaca frontend
       const statusText = results.prediction === 1 ? 'Diabetes Terdeteksi' : 'Aman / Normal';
 
       return {
         id: record._id.toString(),
         date: record.date,
         
-        // Meratakan (Flattening) properti biometrics
         age: String(biometrics.age ?? '-'),
         weight: String(biometrics.weight ?? '-'),
         height: String(biometrics.height ?? '-'),
         bmi: String(biometrics.bmi ?? '-'),
         
-        // Meratakan properti clinical
         highBP: String(clinical.highBP ?? 'No'),
         highChol: String(clinical.highChol ?? 'No'),
         
-        // Meratakan properti results
         prediction: String(results.prediction ?? 0),
         status: statusText,
         risk_level: results.riskLevel || 'Unknown',
@@ -100,7 +114,6 @@ exports.getRecords = async (req, res) => {
       };
     });
 
-    // 4. Kirim data yang sudah rapi ke frontend
     return res.status(200).json(formattedRecords);
 
   } catch (err) {
@@ -127,39 +140,75 @@ exports.predict = async (req, res) => {
     }
 
     const payload = req.body;
+    
+    // Fix Prioritas 1: Bangun payload khusus AI
+    const aiPayload = buildAiPayload(payload);
+
+    // Fix Prioritas 7: Validasi payload AI sebelum menembak service
+    const missingOrInvalidFields = validateAiPayload(aiPayload);
+    if (missingOrInvalidFields.length > 0) {
+      return res.status(400).json({
+        message: 'Payload prediksi tidak valid.',
+        fields: missingOrInvalidFields
+      });
+    }
+
     const predictService = require('../services/predictService');
     
     let aiResponse;
     try {
-      aiResponse = await predictService.getAiPrediction(payload);
+      // Pastikan melemparkan aiPayload, bukan payload utuh req.body
+      aiResponse = await predictService.getAiPrediction(aiPayload);
     } catch (aiErr) {
       console.warn("⚠️ AI Service gagal, beralih ke Fallback Predictor:", aiErr.message);
-      aiResponse = fallbackPredict(payload);
+      // Fallback service juga disesuaikan menggunakan aiPayload
+      aiResponse = predictService.getAiPredictionFromFallback(aiPayload);
     }
 
+    // Fix Prioritas 4 & 5: Normalisasi & Skala Probability 0-1
+    const rawProbability = Number(aiResponse.probability);
+    const parsedProbability = Number.isFinite(rawProbability) ? rawProbability : 0;
+    const normalizedProbability = parsedProbability > 1 ? parsedProbability / 100 : parsedProbability;
+
+    const rawPrediction = Number(aiResponse.prediction);
+    const normalizedPrediction = Number.isFinite(rawPrediction) ? rawPrediction : 0;
+
+    const rawThreshold = Number(aiResponse.threshold_used);
+    const normalizedThreshold = Number.isFinite(rawThreshold) ? rawThreshold : 0.5;
+
     const normalizedResponse = {
-      probability: typeof aiResponse.probability === 'number' ? aiResponse.probability : 0,
+      probability: normalizedProbability,
       risk_level: aiResponse.risk_level || 'Unknown',
-      prediction: typeof aiResponse.prediction === 'number' ? aiResponse.prediction : 0,
-      threshold_used: aiResponse.threshold_used || 0.5,
+      prediction: normalizedPrediction,
+      threshold_used: normalizedThreshold,
       explanation_method: aiResponse.explanation_method || 'N/A',
       ai_recommendation: aiResponse.ai_recommendation || '',
       top_risk_factors: normalizeTopRiskFactors(aiResponse.top_risk_factors || aiResponse.topRiskFactors)
     };
 
+    // Ambil metadata berat & tinggi yang tidak masuk aiPayload
+    const weight = payload.Weight ?? payload.weight ?? payload.weightKg ?? payload.biometrics?.weight ?? payload.biometrics?.weightKg ?? null;
+    const height = payload.Height ?? payload.height ?? payload.heightCm ?? payload.biometrics?.height ?? payload.biometrics?.heightCm ?? null;
+
+    // Fix Prioritas 2 & 3: Simpan data terstruktur dan aman dari jebakan `||`
     const newRecord = new HealthRecord({
       userId: new mongoose.Types.ObjectId(String(rawUserId).trim()),
       biometrics: {
-        age: payload.Age || payload.age || null,
-        weight: payload.Weight || payload.weight || null,
-        height: payload.Height || payload.height || null,
-        bmi: payload.BMI || payload.bmi || null
+        age: aiPayload.Age,
+        bmi: aiPayload.BMI,
+        weight: weight,
+        height: height
       },
       clinical: {
-        highBP: payload.HighBP || payload.highBP || 'No',
-        highChol: payload.HighChol || payload.highChol || 'No',
-        genHlth: payload.GenHlth || payload.genHlth || 'Good',
-        sex: payload.Sex || payload.sex || 'Male'
+        highBP: aiPayload.HighBP,
+        highChol: aiPayload.HighChol,
+        genHlth: aiPayload.GenHlth,
+        cholCheck: aiPayload.CholCheck
+      },
+      lifestyle: {
+        hvyAlcoholConsump: aiPayload.HvyAlcoholConsump,
+        physActivity: aiPayload.PhysActivity,
+        smoker: aiPayload.Smoker
       },
       results: {
         diabetesRisk: normalizedResponse.probability,

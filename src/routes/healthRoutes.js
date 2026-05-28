@@ -3,16 +3,16 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const healthController = require('../controllers/healthController');
 const authMiddleware = require('../middleware/authMiddleware');
-const HealthRecord = require('../models/HealthRecord'); // Di-import di atas agar clean
+const HealthRecord = require('../models/HealthRecord');
 
-// Endpoint: POST /api/health/login
+// Endpoint Auth & Tokens
 router.post('/login', authController.login);
-// Endpoint: POST /api/health/register
 router.post('/register', authController.register);
+// Fix Prioritas 9: Daftarkan route refresh token di sini
+router.post('/refresh', authController.refresh);
 
-// Endpoint: POST /api/health/predict
+// Endpoint Health Predict & Records
 router.post('/predict', authMiddleware, healthController.predict);
-// Endpoint: GET /api/health/records
 router.get('/records', authMiddleware, healthController.getRecords);
 
 // Endpoint: DELETE /api/health/records/:id
@@ -21,7 +21,6 @@ router.delete('/records/:id', authMiddleware, async (req, res) => {
     const recordId = req.params.id;
     const userId = req.user.id;
 
-    // Menghapus menggunakan model yang sudah di-import di atas
     const record = await HealthRecord.findOneAndDelete({ _id: recordId, userId });
 
     if (!record) {
