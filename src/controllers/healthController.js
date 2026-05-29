@@ -20,18 +20,54 @@ function toNumberOrDefault(value, defaultValue = 0) {
   return Number.isFinite(numberValue) ? numberValue : defaultValue;
 }
 
+function ageToCategory(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return 0;
+  if (num >= 1 && num <= 13) return num;
+  if (num < 18) return 0;
+  if (num <= 24) return 1;
+  if (num <= 29) return 2;
+  if (num <= 34) return 3;
+  if (num <= 39) return 4;
+  if (num <= 44) return 5;
+  if (num <= 49) return 6;
+  if (num <= 54) return 7;
+  if (num <= 59) return 8;
+  if (num <= 64) return 9;
+  if (num <= 69) return 10;
+  if (num <= 74) return 11;
+  if (num <= 79) return 12;
+  return 13;
+}
+
 function buildAiPayload(payload) {
   return {
     HighBP: toNumberOrDefault(pickValue(payload, 'HighBP', 'highBP', 'clinical')),
     GenHlth: toNumberOrDefault(pickValue(payload, 'GenHlth', 'genHlth', 'clinical'), 1),
     HighChol: toNumberOrDefault(pickValue(payload, 'HighChol', 'highChol', 'clinical')),
-    Age: toNumberOrDefault(pickValue(payload, 'Age', 'age', 'biometrics')),
+    Age: ageToCategory(pickValue(payload, 'Age', 'age', 'biometrics')),
     CholCheck: toNumberOrDefault(pickValue(payload, 'CholCheck', 'cholCheck', 'clinical')),
     HvyAlcoholConsump: toNumberOrDefault(pickValue(payload, 'HvyAlcoholConsump', 'hvyAlcoholConsump', 'lifestyle')),
     BMI: toNumberOrDefault(pickValue(payload, 'BMI', 'bmi', 'biometrics'), 22),
     PhysActivity: toNumberOrDefault(pickValue(payload, 'PhysActivity', 'physActivity', 'lifestyle')),
     Smoker: toNumberOrDefault(pickValue(payload, 'Smoker', 'smoker', 'lifestyle'))
   };
+}
+
+function validateAiPayload(aiPayload) {
+  const requiredFields = [
+    'HighBP',
+    'GenHlth',
+    'HighChol',
+    'Age',
+    'CholCheck',
+    'HvyAlcoholConsump',
+    'BMI',
+    'PhysActivity',
+    'Smoker'
+  ];
+
+  return requiredFields.filter((field) => !Number.isFinite(aiPayload[field]));
 }
 
 // ==========================================================
@@ -87,6 +123,14 @@ exports.predict = async (req, res) => {
 
     const payload = req.body;
     const aiPayload = buildAiPayload(payload);
+
+    const missingOrInvalidFields = validateAiPayload(aiPayload);
+    if (missingOrInvalidFields.length > 0) {
+      return res.status(400).json({
+        message: 'Payload prediksi tidak valid.',
+        fields: missingOrInvalidFields
+      });
+    }
 
     const predictService = require('../services/predictService');
     let aiResponse;
